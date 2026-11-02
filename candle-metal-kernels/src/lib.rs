@@ -2,6 +2,37 @@ use metal::{
     Buffer, CompileOptions, ComputeCommandEncoderRef, ComputePipelineState, Device, Function,
     FunctionConstantValues, Library, MTLDataType, MTLSize, NSUInteger,
 };
+use metal::objc::{msg_send, sel, sel_impl};
+
+// Clang's availability checks use this libSystem runtime entry point.
+extern "C" {
+    fn __isPlatformVersionAtLeast(platform: u32, major: u32, minor: u32, patch: u32) -> bool;
+}
+
+fn compile_options() -> CompileOptions {
+    let options = CompileOptions::new();
+    #[cfg(target_os = "macos")]
+    let supported = unsafe { __isPlatformVersionAtLeast(1, 14, 0, 0) };
+    #[cfg(target_os = "ios")]
+    let supported = unsafe { __isPlatformVersionAtLeast(2, 17, 0, 0) };
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    let supported = false;
+    if supported {
+        // metal 0.27 predates the 3.1 enum member; the Objective-C setter
+        // takes an NSUInteger with the documented MTLLanguageVersion encoding.
+        unsafe {
+            let _: () = msg_send![&*options, setLanguageVersion: 0x30001usize];
+        }
+    }
+    options
+}
+
+#[cfg(test)]
+#[test]
+fn compile_gemm_library_on_metal() {
+    let device = Device::system_default().unwrap();
+    Kernels::new().load_library(&device, Source::Gemm).unwrap();
+}
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::RwLock;
@@ -310,7 +341,7 @@ impl Kernels {
             let lib = {
                 let source_content = self.get_library_source(source);
                 device
-                    .new_library_with_source(source_content, &CompileOptions::new())
+                    .new_library_with_source(source_content, &compile_options())
                     .map_err(|e| MetalKernelError::LoadLibraryError(e.to_string()))?
             };
             libraries.insert(source, lib.clone());
