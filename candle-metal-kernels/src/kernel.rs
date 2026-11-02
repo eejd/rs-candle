@@ -191,6 +191,10 @@ impl Kernels {
 
 fn get_compile_options() -> Retained<MTLCompileOptions> {
     let compile_options = MTLCompileOptions::new();
+    // Pin the JIT language version while retaining Metal 3 bfloat support.
+    if available!(macos = 15, ios = 18) {
+        compile_options.setLanguageVersion(objc2_metal::MTLLanguageVersion::Version3_2);
+    }
     //unsafe { compile_options.setEnableLogging(true) };
 
     let fast_math_enabled = get_env_bool("CANDLE_METAL_ENABLE_FAST_MATH", true);
@@ -216,6 +220,12 @@ fn get_compile_options() -> Retained<MTLCompileOptions> {
 mod tests {
     use super::*;
     use std::sync::Barrier;
+
+    #[test]
+    fn compile_gemm_library_on_metal() {
+        let device = Device::system_default().unwrap();
+        Kernels::new().load_library(&device, Source::Gemm).unwrap();
+    }
 
     #[test]
     fn concurrent_cache_loads_insert_once() {
